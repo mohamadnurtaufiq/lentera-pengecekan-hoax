@@ -1,7 +1,7 @@
 const $ = (id) => document.getElementById(id);
 
 // Kata-kata yang diabaikan
-const STOP = new Set("yang di ke dari dan atau ini itu dengan untuk pada adalah akan telah sudah dalam juga tidak bisa ada oleh para tersebut bahwa sebagai jadi saat baru tahun pada sejak berita kabar the a of to in is on for and".split(" "));
+const STOP = new Set("yang di ke dari dan atau ini itu dengan untuk pada adalah akan telah sudah dalam juga tidak bisa ada oleh para tersebut bahwa sebagai jadi saat baru tahun pada sejak berita kabar sekarang kini masih the a of to in is on for and".split(" "));
 
 const keywords = (t) => [...new Set(
   (t || "").toLowerCase().replace(/<[^>]+>/g, " ").replace(/[^a-z0-9\s]/g, " ")
@@ -16,34 +16,68 @@ const fetchTimeout = (url, ms = 10000) => {
   return fetch(url, { signal: c.signal }).then(r => { clearTimeout(t); if (!r.ok) throw r.status; return r; });
 };
 
-const proxy = (url) => `/proxy?url=${encodeURIComponent(url)}`;
+const IS_LOCAL = location.hostname === "localhost" || location.hostname === "127.0.0.1";
+
+const proxy = (url) => IS_LOCAL ? `/proxy?url=${encodeURIComponent(url)}` : null;
+
+// Gemini API key: di localhost dari server (.env), di GitHub Pages dari localStorage
+function getApiKey() {
+  let k = localStorage.getItem("GEMINI_API_KEY") || "";
+  if (!k) {
+    k = prompt("Masukkan Gemini API Key (dari aistudio.google.com/apikey):\nKey akan disimpan di browser ini.") || "";
+    if (k) localStorage.setItem("GEMINI_API_KEY", k);
+  }
+  return k;
+}
 
 function parseRSS(xmlText, label) {
   const xml = new DOMParser().parseFromString(xmlText, "text/xml");
   return [...xml.querySelectorAll("item")].slice(0, 15).map(i => ({
     source: label,
+    media: i.querySelector("source")?.textContent || "",
+    date: i.querySelector("pubDate")?.textContent || "",
     title: i.querySelector("title")?.textContent || "",
     url: i.querySelector("link")?.textContent || "#",
   }));
 }
 
+// Media berita Indonesia yang terverifikasi Dewan Pers & dikenal akurat
+const TRUSTED = ["liputan6.com", "kompas.com", "detik.com", "tempo.co", "antaranews.com",
+  "cnnindonesia.com", "cnbcindonesia.com", "kumparan.com", "tirto.id", "republika.co.id", "metrotvnews.com", "bbc.com"];
+
 // ===== Sumber pencarian =====
 const SOURCES = {
+  "Media Terpercaya": async (q) => {
+    const site = TRUSTED.map(s => "site:" + s).join(" OR ");
+    const rss = `https://news.google.com/rss/search?q=${encodeURIComponent(`${q} (${site})`)}&hl=id&gl=ID&ceid=ID:id`;
+    const p = proxy(rss);
+    if (!p) return []; // GitHub Pages: tidak bisa proxy RSS
+    return parseRSS(await (await fetchTimeout(p)).text(), "Media Terpercaya")
+      .map(a => ({ ...a, trusted: true, source: "📰 " + (a.media || "Media Terpercaya") }));
+  },
   "Google News": async (q) => {
     const rss = `https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=id&gl=ID&ceid=ID:id`;
-    return parseRSS(await (await fetchTimeout(proxy(rss))).text(), "Google News");
+    const p = proxy(rss);
+    if (!p) return [];
+    return parseRSS(await (await fetchTimeout(p)).text(), "Google News");
   },
   "Bing News": async (q) => {
     const rss = `https://www.bing.com/news/search?q=${encodeURIComponent(q)}&format=rss&setlang=id`;
-    return parseRSS(await (await fetchTimeout(proxy(rss))).text(), "Bing News");
+    const p = proxy(rss);
+    if (!p) return [];
+    return parseRSS(await (await fetchTimeout(p)).text(), "Bing News");
   },
   "Bing Web": async (q) => {
     const rss = `https://www.bing.com/search?q=${encodeURIComponent(q)}&format=rss&setlang=id&cc=ID`;
-    return parseRSS(await (await fetchTimeout(proxy(rss))).text(), "Bing Web");
+    const p = proxy(rss);
+    if (!p) return [];
+    return parseRSS(await (await fetchTimeout(p)).text(), "Bing Web");
   },
   "GDELT": async (q) => {
     const url = `https://api.gdeltproject.org/api/v2/doc/doc?query=${encodeURIComponent(q)}&mode=artlist&format=json&maxrecords=10`;
-    const data = await (await fetchTimeout(proxy(url))).json();
+    const p = proxy(url);
+    if (!p) return [];
+    const data = await (await fetchTimeout(p)).json();
     return (data.articles || []).map(a => ({ source: "GDELT", title: a.title, url: a.url }));
   },
   "Wikipedia": async (q) => {
@@ -57,10 +91,45 @@ const SOURCES = {
   },
   "TurnBackHoax": async (q) => {
     const rss = `https://turnbackhoax.id/?s=${encodeURIComponent(q)}&feed=rss2`;
-    return parseRSS(await (await fetchTimeout(proxy(rss))).text(), "TurnBackHoax")
+    const p = proxy(rss);
+    if (!p) return [];
+    return parseRSS(await (await fetchTimeout(p)).text(), "TurnBackHoax")
       .map(a => ({ ...a, isFactCheck: true }));
   },
 };
+
+// ===== Gemini langsung dari browser (GitHub Pages) =====
+async function callGeminiBrowser(claim, ctx) {
+  const key = getApiKey();
+  if (!key) return { error: "API key belum diisi" };
+  const today = new Date().toLocaleDateString("id-ID", { dateStyle: "long" });
+  const prompt = `Kamu adalah pemeriksa fakta. Hari ini ${today}.\nKlaim: "${claim}"\n\n` +
+    (ctx ? `Judul berita dari media terpercaya (Liputan6, Kompas, Detik, Tempo, Antara, dll):\n${ctx}\n\n` +
+      `Gunakan judul-judul berita di atas sebagai BUKTI UTAMA. Jika berita mendukung klaim → FAKTA. Jika bertentangan → HOAX.\n`
+      : `Tidak ada berita dari media terpercaya. Nilai dengan pengetahuanmu.\n`) +
+    `Wajib pilih salah satu: FAKTA jika klaim benar, HOAX jika klaim salah/tidak terbukti.\n` +
+    `Balas HANYA JSON tanpa markdown:\n{"verdict":"FAKTA"|"HOAX","confidence":0-100,"explanation":"penjelasan singkat bahasa Indonesia, sebut nama media, maks 3 kalimat"}`;
+
+  const models = ["gemini-flash-latest", "gemini-3.5-flash", "gemini-flash-lite-latest", "gemini-3.1-flash-lite"];
+  for (const m of models) {
+    try {
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!r.ok) continue;
+      const data = await r.json();
+      const text = (data.candidates?.[0]?.content?.parts || []).map(p => p.text || "").join("");
+      const json = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] || "{}");
+      const sources = (data.candidates?.[0]?.groundingMetadata?.groundingChunks || [])
+        .filter(c => c.web).map(c => ({ title: c.web.title, url: c.web.uri }));
+      return { ...json, sources };
+    } catch { continue; }
+  }
+  return { error: "Semua model Gemini gagal. Coba lagi nanti." };
+}
 
 // ===== Pencocokan =====
 const isYear = (w) => /^(1[5-9]\d\d|20\d\d)$/.test(w);
@@ -91,19 +160,28 @@ $("checkForm").addEventListener("submit", async (e) => {
   const input = $("newsInput").value.trim();
   if (!input) return;
 
-  // 1. LANGSUNG buka Google Search di tab baru supaya user bisa lihat sendiri
-  window.open(`https://www.google.com/search?q=${encodeURIComponent(input)}`, "_blank");
-
-  // 2. Analisis otomatis di belakang layar
+  // Analisis otomatis (link Google tersedia di bagian "Cek manual")
   $("checkBtn").disabled = true;
   $("result").classList.add("hidden");
   $("loading").classList.remove("hidden");
 
   const query = input.split(/[.!?\n]/).map(s => s.trim()).find(s => s.split(/\s+/).length >= 3) || input;
   const names = Object.keys(SOURCES);
-  const geminiP = fetch(`/gemini?q=${encodeURIComponent(input)}`).then(r => r.json()).catch(e => ({ error: e.message }));
+  $("loadingText").textContent = "Mencari di media berita terpercaya...";
   const results = await Promise.allSettled(names.map(n => SOURCES[n](query)));
-  const gem = await geminiP;
+
+  // Berita dari media terpercaya → dikirim ke Gemini sebagai bukti
+  const trustedNews = (results[0].status === "fulfilled" ? results[0].value : []).slice(0, 12);
+  const ctx = trustedNews.map(a => `- [${a.media}] ${a.title} (${a.date.slice(5, 16)})`).join("\n");
+  $("loadingText").textContent = "Gemini AI menganalisis berita...";
+
+  let gem;
+  if (IS_LOCAL) {
+    gem = await fetch(`/gemini?q=${encodeURIComponent(input)}&ctx=${encodeURIComponent(ctx)}`)
+      .then(r => r.json()).catch(e => ({ error: e.message }));
+  } else {
+    gem = await callGeminiBrowser(input, ctx);
+  }
   const gemOk = !gem.error && gem.verdict;
 
   const status = names.map((n, i) => ({
@@ -118,7 +196,7 @@ $("checkForm").addEventListener("submit", async (e) => {
 
   const conflicting = scored.filter(a => a.conflict);
   // Klaim pendek: SEMUA kata kunci harus ada (1 kata beda bisa mengubah makna)
-  const minScore = keywords(query).filter(w => !isYear(w)).length <= 5 ? 1 : 0.8;
+  const minScore = keywords(query).filter(w => !isYear(w)).length <= 5 ? 1 : 0.6;
   const all = scored.filter(a => a.score >= minScore).sort((a, b) => b.score - a.score);
 
   const debunked = all.filter(a => a.isFactCheck || HOAX_LABEL.test(a.title));
@@ -136,34 +214,34 @@ $("checkForm").addEventListener("submit", async (e) => {
     conf = Math.min(95, 70 + debunked.length * 5);
   } else if (supporting.length > 0) {
     verdict = "fakta"; list = supporting;
-    msg = `Berita ini ditemukan di <b>${supporting.length}</b> sumber. Cek juga hasil Google di tab yang baru terbuka.`;
+    msg = `Berita ini ditemukan di <b>${supporting.length}</b> sumber. Lihat daftar berita di bawah.`;
     conf = Math.min(95, 50 + supporting.length * 7);
   } else {
     verdict = "hoax"; list = [];
-    msg = "Berita ini tidak ditemukan di sumber mana pun. Cek hasil Google di tab baru untuk memastikan.";
-    conf = 65;
+    msg = "Berita ini <b>tidak ditemukan</b> di sumber terpercaya. Gunakan tombol cek manual di bawah untuk memastikan.";
+    conf = 60;
   }
 
-  // Gemini diutamakan jika jawabannya tegas
-  if (gemOk && gem.verdict !== "TIDAK PASTI") {
+  // Gemini menilai berdasarkan berita media terpercaya
+  if (gemOk) {
     verdict = gem.verdict === "FAKTA" ? "fakta" : "hoax";
     conf = Math.max(0, Math.min(99, Number(gem.confidence) || 70));
-    msg = `🤖 <b>Gemini AI:</b> ${gem.explanation || ""}`;
-    list = (gem.sources || []).map(s => ({ ...s, source: "Gemini · Google Search" })).concat(list);
-  } else if (gemOk) {
-    msg = `🤖 <b>Gemini AI (tidak pasti):</b> ${gem.explanation || ""}<br>` + msg;
+    msg = `🤖 <b>Gemini AI</b> (berdasarkan ${trustedNews.length} berita media terpercaya): ${gem.explanation || ""}`;
+    const rel = trustedNews.map(a => ({ ...a, ...matchScore(query, a.title) })).sort((a, b) => b.score - a.score);
+    list = rel.concat((gem.sources || []).map(s => ({ ...s, source: "Gemini · Google Search" })));
   } else {
     msg += `<br><small style="color:#f87171">⚠️ Gemini gagal: ${gem.error || "tidak ada jawaban"}</small>`;
   }
 
-  const isFakta = verdict === "fakta";
-  $("verdict").className = "card verdict " + verdict;
+  const isFakta = verdict === "fakta", isUnk = verdict === "unknown";
+  const color = isFakta ? "#10b981" : isUnk ? "#f59e0b" : "#ef4444";
+  $("verdict").className = "card verdict " + (isUnk ? "" : verdict);
   $("verdict").innerHTML = `
-    <div class="icon">${isFakta ? "✅" : "❌"}</div>
-    <h2>${isFakta ? "BUKAN HOAX" : "TERINDIKASI HOAX"}</h2>
+    <div class="icon">${isFakta ? "✅" : isUnk ? "❔" : "❌"}</div>
+    <h2 style="color:${color}">${isFakta ? "BUKAN HOAX" : isUnk ? "BELUM DAPAT DIPASTIKAN" : "TERINDIKASI HOAX"}</h2>
     <p>${msg}</p>
-    <div class="meter"><div style="width:${conf}%;background:${isFakta ? "#10b981" : "#ef4444"}"></div></div>
-    <small>Tingkat keyakinan: ${conf}%</small>
+    ${isUnk ? "" : `<div class="meter"><div style="width:${conf}%;background:${color}"></div></div>
+    <small>Tingkat keyakinan: ${conf}%</small>`}
     <p style="margin-top:12px;font-size:.8rem;opacity:.7">
       Sumber dicek: ${status.map(s => `${s.ok ? "🟢" : "🔴"} ${s.name} (${s.count})`).join(" · ")}
     </p>`;
