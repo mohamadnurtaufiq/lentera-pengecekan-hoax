@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="id">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>lentera.fact — Pengecek Berita Hoax</title>
+  <meta name="description"
+    content="Cek apakah sebuah berita hoax atau fakta dengan mencarinya di berbagai sumber berita dan Wikipedia." />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" type="image/png" href="logo.png" />
+</head>
+
+<body>
+  <div class="blob b1"></div>
+  <div class="blob b2"></div>
+  <header class="nav">
+    <div class="logo"><img src="logo.png" alt="Logo Lentera"
+        style="height:36px;vertical-align:middle;margin-right:8px;border-radius:8px" />lentera.<span>fact</span></div>
+    <small>Tugas Kewarganegaraan</small>
+  </header>
+
+  <main class="container">
+    <section class="hero">
+      <h1>Jangan Mudah Percaya, <span class="grad">Cek Dulu!</span></h1>
+      <p>Masukkan judul atau isi berita. Sistem akan mencarinya di berbagai sumber. Jika ditemukan → <b>Fakta</b>, jika
+        tidak ditemukan → <b>Hoax</b>.</p>
+    </section>
+
+    <form id="checkForm" class="card search">
+      <textarea id="newsInput" rows="3" placeholder="Contoh: Indonesia merdeka pada 17 Agustus 1945"
+        required></textarea>
+      <button id="checkBtn" type="submit">🔍 Cek Berita</button>
+    </form>
+
+    <section id="loading" class="hidden card center">
+      <div class="spinner"></div>
+      <p id="loadingText">Mencari di berbagai sumber...</p>
+    </section>
+
+    <section id="result" class="hidden">
+      <div id="verdict" class="card verdict"></div>
+      <div id="sources" class="sources"></div>
+      <div class="card manual">
+        <h3>Cek manual di situs pemeriksa fakta:</h3>
+        <div id="manualLinks" class="links"></div>
+      </div>
+    </section>
+
+    <section class="card tips">
+      <h2>Tips Mengenali Hoax</h2>
+      <ul>
+        <li>⚠️ Judul provokatif & bikin emosi</li>
+        <li>🔗 Sumber tidak jelas / tanpa link</li>
+        <li>📅 Tanggal & tempat kejadian kabur</li>
+        <li>📢 Ada ajakan "sebarkan sebelum dihapus!"</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>Dibuat untuk tugas Pendidikan Kewarganegaraan · Selalu saring sebelum sharing</footer>
+  <script src="script.js"></script>
+</body>
+
+</html>
