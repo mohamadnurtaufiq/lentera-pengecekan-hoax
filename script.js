@@ -16,19 +16,7 @@ const fetchTimeout = (url, ms = 10000) => {
   return fetch(url, { signal: c.signal }).then(r => { clearTimeout(t); if (!r.ok) throw r.status; return r; });
 };
 
-const IS_LOCAL = location.hostname === "localhost" || location.hostname === "127.0.0.1";
-
-const proxy = (url) => IS_LOCAL ? `/proxy?url=${encodeURIComponent(url)}` : null;
-
-// Gemini API key: di localhost dari server (.env), di GitHub Pages dari localStorage
-function getApiKey() {
-  let k = localStorage.getItem("GEMINI_API_KEY") || "";
-  if (!k) {
-    k = prompt("Masukkan Gemini API Key (dari aistudio.google.com/apikey):\nKey akan disimpan di browser ini.") || "";
-    if (k) localStorage.setItem("GEMINI_API_KEY", k);
-  }
-  return k;
-}
+const proxy = (url) => `/proxy?url=${encodeURIComponent(url)}`;
 
 function parseRSS(xmlText, label) {
   const xml = new DOMParser().parseFromString(xmlText, "text/xml");
@@ -50,34 +38,24 @@ const SOURCES = {
   "Media Terpercaya": async (q) => {
     const site = TRUSTED.map(s => "site:" + s).join(" OR ");
     const rss = `https://news.google.com/rss/search?q=${encodeURIComponent(`${q} (${site})`)}&hl=id&gl=ID&ceid=ID:id`;
-    const p = proxy(rss);
-    if (!p) return []; // GitHub Pages: tidak bisa proxy RSS
-    return parseRSS(await (await fetchTimeout(p)).text(), "Media Terpercaya")
+    return parseRSS(await (await fetchTimeout(proxy(rss))).text(), "Media Terpercaya")
       .map(a => ({ ...a, trusted: true, source: "📰 " + (a.media || "Media Terpercaya") }));
   },
   "Google News": async (q) => {
     const rss = `https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=id&gl=ID&ceid=ID:id`;
-    const p = proxy(rss);
-    if (!p) return [];
-    return parseRSS(await (await fetchTimeout(p)).text(), "Google News");
+    return parseRSS(await (await fetchTimeout(proxy(rss))).text(), "Google News");
   },
   "Bing News": async (q) => {
     const rss = `https://www.bing.com/news/search?q=${encodeURIComponent(q)}&format=rss&setlang=id`;
-    const p = proxy(rss);
-    if (!p) return [];
-    return parseRSS(await (await fetchTimeout(p)).text(), "Bing News");
+    return parseRSS(await (await fetchTimeout(proxy(rss))).text(), "Bing News");
   },
   "Bing Web": async (q) => {
     const rss = `https://www.bing.com/search?q=${encodeURIComponent(q)}&format=rss&setlang=id&cc=ID`;
-    const p = proxy(rss);
-    if (!p) return [];
-    return parseRSS(await (await fetchTimeout(p)).text(), "Bing Web");
+    return parseRSS(await (await fetchTimeout(proxy(rss))).text(), "Bing Web");
   },
   "GDELT": async (q) => {
     const url = `https://api.gdeltproject.org/api/v2/doc/doc?query=${encodeURIComponent(q)}&mode=artlist&format=json&maxrecords=10`;
-    const p = proxy(url);
-    if (!p) return [];
-    const data = await (await fetchTimeout(p)).json();
+    const data = await (await fetchTimeout(proxy(url))).json();
     return (data.articles || []).map(a => ({ source: "GDELT", title: a.title, url: a.url }));
   },
   "Wikipedia": async (q) => {
@@ -91,45 +69,11 @@ const SOURCES = {
   },
   "TurnBackHoax": async (q) => {
     const rss = `https://turnbackhoax.id/?s=${encodeURIComponent(q)}&feed=rss2`;
-    const p = proxy(rss);
-    if (!p) return [];
-    return parseRSS(await (await fetchTimeout(p)).text(), "TurnBackHoax")
+    return parseRSS(await (await fetchTimeout(proxy(rss))).text(), "TurnBackHoax")
       .map(a => ({ ...a, isFactCheck: true }));
   },
 };
 
-// ===== Gemini langsung dari browser (GitHub Pages) =====
-async function callGeminiBrowser(claim, ctx) {
-  const key = getApiKey();
-  if (!key) return { error: "API key belum diisi" };
-  const today = new Date().toLocaleDateString("id-ID", { dateStyle: "long" });
-  const prompt = `Kamu adalah pemeriksa fakta. Hari ini ${today}.\nKlaim: "${claim}"\n\n` +
-    (ctx ? `Judul berita dari media terpercaya (Liputan6, Kompas, Detik, Tempo, Antara, dll):\n${ctx}\n\n` +
-      `Gunakan judul-judul berita di atas sebagai BUKTI UTAMA. Jika berita mendukung klaim → FAKTA. Jika bertentangan → HOAX.\n`
-      : `Tidak ada berita dari media terpercaya. Nilai dengan pengetahuanmu.\n`) +
-    `Wajib pilih salah satu: FAKTA jika klaim benar, HOAX jika klaim salah/tidak terbukti.\n` +
-    `Balas HANYA JSON tanpa markdown:\n{"verdict":"FAKTA"|"HOAX","confidence":0-100,"explanation":"penjelasan singkat bahasa Indonesia, sebut nama media, maks 3 kalimat"}`;
-
-  const models = ["gemini-flash-latest", "gemini-3.5-flash", "gemini-flash-lite-latest", "gemini-3.1-flash-lite"];
-  for (const m of models) {
-    try {
-      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-goog-api-key": key },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
-        signal: AbortSignal.timeout(15000),
-      });
-      if (!r.ok) continue;
-      const data = await r.json();
-      const text = (data.candidates?.[0]?.content?.parts || []).map(p => p.text || "").join("");
-      const json = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] || "{}");
-      const sources = (data.candidates?.[0]?.groundingMetadata?.groundingChunks || [])
-        .filter(c => c.web).map(c => ({ title: c.web.title, url: c.web.uri }));
-      return { ...json, sources };
-    } catch { continue; }
-  }
-  return { error: "Semua model Gemini gagal. Coba lagi nanti." };
-}
 
 // ===== Pencocokan =====
 const isYear = (w) => /^(1[5-9]\d\d|20\d\d)$/.test(w);
@@ -175,13 +119,8 @@ $("checkForm").addEventListener("submit", async (e) => {
   const ctx = trustedNews.map(a => `- [${a.media}] ${a.title} (${a.date.slice(5, 16)})`).join("\n");
   $("loadingText").textContent = "Gemini AI menganalisis berita...";
 
-  let gem;
-  if (IS_LOCAL) {
-    gem = await fetch(`/gemini?q=${encodeURIComponent(input)}&ctx=${encodeURIComponent(ctx)}`)
-      .then(r => r.json()).catch(e => ({ error: e.message }));
-  } else {
-    gem = await callGeminiBrowser(input, ctx);
-  }
+  const gem = await fetch(`/gemini?q=${encodeURIComponent(input)}&ctx=${encodeURIComponent(ctx)}`)
+    .then(r => r.json()).catch(e => ({ error: e.message }));
   const gemOk = !gem.error && gem.verdict;
 
   const status = names.map((n, i) => ({
