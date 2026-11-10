@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    { "source": "/gemini", "destination": "/api/index?__ep=gemini" },
+    { "source": "/gemini-image", "destination": "/api/index?__ep=gemini-image" },
+    { "source": "/proxy", "destination": "/api/index?__ep=proxy" }
+  ]
+}
+

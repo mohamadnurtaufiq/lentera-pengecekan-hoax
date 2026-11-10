@@ -16,11 +16,12 @@ const PORT = 3000;
 const ALLOWED = /(^|\.)(google\.com|bing\.com|turnbackhoax\.id|gdeltproject\.org|wikipedia\.org)$/;
 const TYPES = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".png": "image/png", ".svg": "image/svg+xml" };
 
-http.createServer(async (req, res) => {
+const handler = async (req, res) => {
   const u = new URL(req.url, `http://localhost:${PORT}`);
+  const ep = u.searchParams.get("__ep") || u.pathname.replace(/^\/+/, "");
 
   // Gemini + Google Search (mirip "Ringkasan AI" Google)
-  if (u.pathname === "/gemini") {
+  if (ep === "gemini") {
     res.setHeader("Content-Type", "application/json");
     const key = process.env.GEMINI_API_KEY;
     if (!key) { res.writeHead(500); return res.end(JSON.stringify({ error: "GEMINI_API_KEY belum diset" })); }
@@ -75,22 +76,26 @@ http.createServer(async (req, res) => {
   }
 
   // Gemini Vision: Cek Gambar Hoax / Manipulasi / Buatan AI (AI-Generated)
-  if (u.pathname === "/gemini-image" && req.method === "POST") {
+  if (ep === "gemini-image" && req.method === "POST") {
     res.setHeader("Content-Type", "application/json");
     const key = process.env.GEMINI_API_KEY;
-    if (!key) { res.writeHead(500); return res.end(JSON.stringify({ error: "GEMINI_API_KEY belum diset" })); }
+    if (!key) { res.writeHead(500); return res.end(JSON.stringify({ error: "GEMINI_API_KEY belum diset di Environment Variables" })); }
     try {
-      const bodyRaw = await new Promise((resolve, reject) => {
-        let chunks = "", size = 0;
-        req.on("data", c => {
-          size += c.length;
-          if (size > 12 * 1024 * 1024) { reject(new Error("Ukuran gambar terlalu besar (maks 10MB)")); req.destroy(); }
-          else chunks += c;
+      let parsedBody = req.body;
+      if (!parsedBody || typeof parsedBody !== "object") {
+        const bodyRaw = typeof parsedBody === "string" ? parsedBody : await new Promise((resolve, reject) => {
+          let chunks = "", size = 0;
+          req.on("data", c => {
+            size += c.length;
+            if (size > 12 * 1024 * 1024) { reject(new Error("Ukuran gambar terlalu besar (maks 10MB)")); req.destroy(); }
+            else chunks += c;
+          });
+          req.on("end", () => resolve(chunks));
+          req.on("error", reject);
         });
-        req.on("end", () => resolve(chunks));
-        req.on("error", reject);
-      });
-      const { imageBase64, mimeType, caption, metaInfo, ctx } = JSON.parse(bodyRaw || "{}");
+        parsedBody = JSON.parse(bodyRaw || "{}");
+      }
+      const { imageBase64, mimeType, metaInfo } = parsedBody;
       if (!imageBase64) throw new Error("Data gambar kosong");
 
       const prompt = `Kamu adalah ahli forensik digital dan detektor gambar AI (AI-generated image detector). Hari ini ${new Date().toLocaleDateString("id-ID", { dateStyle: "long" })}.\n` +
@@ -145,7 +150,7 @@ http.createServer(async (req, res) => {
     return;
   }
 
-  if (u.pathname === "/proxy") {
+  if (ep === "proxy") {
     try {
       const target = new URL(u.searchParams.get("url"));
       if (!ALLOWED.test(target.hostname)) throw new Error("host tidak diizinkan");
@@ -168,4 +173,10 @@ http.createServer(async (req, res) => {
     res.writeHead(200, { "Content-Type": TYPES[path.extname(file)] || "application/octet-stream" });
     res.end(data);
   });
-}).listen(PORT, () => console.log(`✅ Buka http://localhost:${PORT}`));
+};
+
+module.exports = handler;
+
+if (require.main === module) {
+  http.createServer(handler).listen(PORT, () => console.log(`✅ Buka http://localhost:${PORT}`));
+}
