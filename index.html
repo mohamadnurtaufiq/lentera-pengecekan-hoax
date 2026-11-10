@@ -24,14 +24,32 @@
   <main class="container">
     <section class="hero">
       <h1>Jangan Mudah Percaya, <span class="grad">Cek Dulu!</span></h1>
-      <p>Masukkan judul atau isi berita. Sistem akan mencarinya di berbagai sumber. Jika ditemukan → <b>Fakta</b>, jika
-        tidak ditemukan → <b>Hoax</b>.</p>
+      <p>Masukkan judul/isi berita atau unggah foto/gambar. Sistem akan memeriksa kebenaran berita serta mendeteksi <b>foto hoax / editan</b> maupun <b>gambar buatan AI</b>.</p>
     </section>
 
     <form id="checkForm" class="card search">
-      <textarea id="newsInput" rows="3" placeholder="Contoh: Indonesia merdeka pada 17 Agustus 1945"
-        required></textarea>
-      <button id="checkBtn" type="submit">🔍 Cek Berita</button>
+      <textarea id="newsInput" rows="3" placeholder="Contoh : masukin judul atau isi berita"></textarea>
+
+      <div class="upload-area" id="dropZone">
+        <input type="file" id="imageInput" accept="image/*" hidden />
+        <div id="uploadPrompt" class="upload-prompt">
+          <span class="upload-icon">🖼️</span>
+          <div>
+            <strong>Unggah Foto / Gambar untuk Cek Hoax & Deteksi AI</strong>
+            <small>Klik untuk pilih foto, seret & lepas (drag & drop), atau tekan <b>Ctrl+V</b> untuk tempel gambar</small>
+          </div>
+        </div>
+        <div id="imagePreviewBox" class="image-preview hidden">
+          <img id="imagePreview" alt="Pratinjau gambar" />
+          <div class="image-meta">
+            <strong id="imageName">gambar.jpg</strong>
+            <small id="imageInfo"></small>
+            <button type="button" id="removeImageBtn" class="btn-remove">✕ Hapus Gambar</button>
+          </div>
+        </div>
+      </div>
+
+      <button id="checkBtn" type="submit">🔍 Cek Berita / Gambar</button>
     </form>
 
     <section id="loading" class="hidden card center">
@@ -49,12 +67,14 @@
     </section>
 
     <section class="card tips">
-      <h2>Tips Mengenali Hoax</h2>
+      <h2>Tips Mengenali Berita Hoax & Foto AI</h2>
       <ul>
         <li>⚠️ Judul provokatif & bikin emosi</li>
         <li>🔗 Sumber tidak jelas / tanpa link</li>
         <li>📅 Tanggal & tempat kejadian kabur</li>
         <li>📢 Ada ajakan "sebarkan sebelum dihapus!"</li>
+        <li>🖐️ Foto AI: perhatikan jari tangan, gigi, atau mata yang aneh</li>
+        <li>🔤 Foto AI: teks di papan/baju terlihat acak & tidak terbaca</li>
       </ul>
     </section>
   </main>
